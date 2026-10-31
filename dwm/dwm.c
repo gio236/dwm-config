@@ -412,7 +412,7 @@ arrange(Monitor *m)
 void
 arrangemon(Monitor *m)
 {
-	strncpy(m->ltsymbol, m->lt[m->sellt]->symbol, sizeof m->ltsymbol);
+	snprintf(m->ltsymbol, sizeof(m->ltsymbol), "%s", m->lt[m->sellt]->symbol);
 	if (m->lt[m->sellt]->arrange)
 		m->lt[m->sellt]->arrange(m);
 }
@@ -576,17 +576,27 @@ configurenotify(XEvent *e)
 
 	/* TODO: updategeom handling sucks, needs to be simplified */
 	if (ev->window == root) {
+		if (ev->width <= 0 || ev->height <= 0)
+			return;
+
 		dirty = (sw != ev->width || sh != ev->height);
 		sw = ev->width;
 		sh = ev->height;
 		if (updategeom() || dirty) {
 			drw_resize(drw, sw, bh);
 			updatebars();
+
 			for (m = mons; m; m = m->next) {
 				for (c = m->clients; c; c = c->next)
 					if (c->isfullscreen)
 						resizeclient(c, m->mx, m->my, m->mw, m->mh);
-				XMoveResizeWindow(dpy, m->barwin, m->wx + sp, m->by + vp, m->ww -  2 * sp, bh);
+				if (m->showbar)
+        {
+          XMoveResizeWindow(dpy, m->barwin, m->wx + sp, m->by + vp, m->ww -  2 * sp, bh);
+        }else
+        {
+          //if (m != mons) fprintf(stderr, "nn ci avevo capito nulla");
+        }
 			}
 			focus(NULL);
 			arrange(NULL);
@@ -663,7 +673,7 @@ createmon(void)
 	m->gappov = gappov;
 	m->lt[0] = &layouts[0];
 	m->lt[1] = &layouts[1 % LENGTH(layouts)];
-	strncpy(m->ltsymbol, layouts[0].symbol, sizeof m->ltsymbol);
+	snprintf(m->ltsymbol, sizeof(m->ltsymbol), "%s", layouts[0].symbol);
 	return m;
 }
 
@@ -718,7 +728,7 @@ dirtomon(int dir)
 void
 drawbar(Monitor *m)
 {
-int x, w, tw = 0;
+  int x, w, tw = 0;
 	int boxs = drw->fonts->h / 9;
 	int boxw = drw->fonts->h / 6 + 2;
 	unsigned int i, occ = 0, urg = 0;
@@ -766,6 +776,7 @@ int x, w, tw = 0;
 			drw_rect(drw, x, 0, w - 2 * sp, bh, 1, 1);
 		}
 	}
+
 	drw_map(drw, m->barwin, 0, 0, m->ww, bh);
 }
 
@@ -940,12 +951,12 @@ gettextprop(Window w, Atom atom, char *text, unsigned int size)
 	if (!XGetTextProperty(dpy, w, &name, atom) || !name.nitems)
 		return 0;
 	if (name.encoding == XA_STRING) {
-		strncpy(text, (char *)name.value, size - 1);
-	} else if (XmbTextPropertyToTextList(dpy, &name, &list, &n) >= Success && n > 0 && *list) {
-		strncpy(text, *list, size - 1);
+		snprintf(text, size, "%s", (char *)name.value);
+	} else if (XmbTextPropertyToTextList(dpy, &name, &list, &n) >= Success) {
+		if (n > 0 && *list)
+			snprintf(text, size, "%s", *list);
 		XFreeStringList(list);
 	}
-	text[size - 1] = '\0';
 	XFree(name.value);
 	return 1;
 }
@@ -1641,7 +1652,7 @@ setlayout(const Arg *arg)
 		selmon->sellt ^= 1;
 	if (arg && arg->v)
 		selmon->lt[selmon->sellt] = (Layout *)arg->v;
-	strncpy(selmon->ltsymbol, selmon->lt[selmon->sellt]->symbol, sizeof selmon->ltsymbol);
+	snprintf(selmon->ltsymbol, sizeof(selmon->ltsymbol), "%s", selmon->lt[selmon->sellt]->symbol);
 	if (selmon->sel)
 		arrange(selmon);
 	else
@@ -1779,10 +1790,16 @@ void
 spawn(const Arg *arg)
 {
 	struct sigaction sa;
+	pid_t pid;
 
 	if (arg->v == dmenucmd)
-		dmenumon[0] = '0' + selmon->num;
-	if (fork() == 0) {
+		snprintf(dmenumon, sizeof(dmenumon), "%d", selmon->num);
+
+	if ((pid = fork()) == -1) {
+		fprintf(stderr, "dwm: fork failed: %s\n", strerror(errno));
+		return;
+	}
+	if (pid == 0) {
 		if (dpy)
 			close(ConnectionNumber(dpy));
 		setsid();
@@ -1961,9 +1978,19 @@ updatebarpos(Monitor *m)
 	/* Se è il monitor secondario oppure lo schermo è più stretto del padding */
 	if (m != mons || (m->ww - 2 * sidepad) <= 0) {
 		m->showbar = 0;
+    if (m->barwin)
+    {
+      XDestroyWindow(dpy, m->barwin);
+      m->barwin = 0;
+    }
 		m->by = -bh - vertpad;
 		return;
-	}
+	}else if(!m->showbar)
+  {
+    m->showbar = 1;
+  }
+
+
 
 	if (m->showbar) {
 		m->wh = m->wh - vertpad - bh;
@@ -2000,6 +2027,7 @@ updatebars(void)
 		XMapRaised(dpy, m->barwin);
 		XSetClassHint(dpy, m->barwin, &ch);
 	}
+
 }
 
 void
@@ -2019,7 +2047,8 @@ updateclientlist(void)
 int
 updategeom(void)
 {
-	int dirty = 0;
+  int dirty = 0;
+
 
 #ifdef XINERAMA
 	if (XineramaIsActive(dpy)) {
@@ -2028,6 +2057,7 @@ updategeom(void)
 		Monitor *m;
 		XineramaScreenInfo *info = XineramaQueryScreens(dpy, &nn);
 		XineramaScreenInfo *unique = NULL;
+
 
 		for (n = 0, m = mons; m; m = m->next, n++);
 		/* only consider unique geometries as separate screens */
@@ -2091,6 +2121,7 @@ updategeom(void)
 		selmon = mons;
 		selmon = wintomon(root);
 	}
+
 	return dirty;
 }
 
@@ -2101,7 +2132,8 @@ updatenumlockmask(void)
 	XModifierKeymap *modmap;
 
 	numlockmask = 0;
-	modmap = XGetModifierMapping(dpy);
+	if (!(modmap = XGetModifierMapping(dpy)))
+		return;
 	for (i = 0; i < 8; i++)
 		for (j = 0; j < modmap->max_keypermod; j++)
 			if (modmap->modifiermap[i * modmap->max_keypermod + j]
@@ -2120,32 +2152,32 @@ updatesizehints(Client *c)
 		/* size is uninitialized, ensure that size.flags aren't used */
 		size.flags = PSize;
 	if (size.flags & PBaseSize) {
-		c->basew = size.base_width;
-		c->baseh = size.base_height;
+		c->basew = MAX(0, size.base_width);
+		c->baseh = MAX(0, size.base_height);
 	} else if (size.flags & PMinSize) {
-		c->basew = size.min_width;
-		c->baseh = size.min_height;
+		c->basew = MAX(0, size.min_width);
+		c->baseh = MAX(0, size.min_height);
 	} else
 		c->basew = c->baseh = 0;
 	if (size.flags & PResizeInc) {
-		c->incw = size.width_inc;
-		c->inch = size.height_inc;
+		c->incw = MAX(0, size.width_inc);
+		c->inch = MAX(0, size.height_inc);
 	} else
 		c->incw = c->inch = 0;
 	if (size.flags & PMaxSize) {
-		c->maxw = size.max_width;
-		c->maxh = size.max_height;
+		c->maxw = MAX(0, size.max_width);
+		c->maxh = MAX(0, size.max_height);
 	} else
 		c->maxw = c->maxh = 0;
 	if (size.flags & PMinSize) {
-		c->minw = size.min_width;
-		c->minh = size.min_height;
+		c->minw = MAX(0, size.min_width);
+		c->minh = MAX(0, size.min_height);
 	} else if (size.flags & PBaseSize) {
-		c->minw = size.base_width;
-		c->minh = size.base_height;
+		c->minw = MAX(0, size.base_width);
+		c->minh = MAX(0, size.base_height);
 	} else
 		c->minw = c->minh = 0;
-	if (size.flags & PAspect) {
+	if ((size.flags & PAspect) && size.min_aspect.x > 0 && size.max_aspect.y > 0) {
 		c->mina = (float)size.min_aspect.y / size.min_aspect.x;
 		c->maxa = (float)size.max_aspect.x / size.max_aspect.y;
 	} else

@@ -21,6 +21,7 @@ static       int smartgaps          = 0;        /* 1 means no outer gap when the
 
 static const int vertpad = 5; /* Margine dall'alto/basso */
 static const int sidepad = 1599; /* Margine dai lati */
+//static const int sidepad = 200; /* Margine dai lati */
 
 // static const char col_gray1[]       = "#222222";
 // static const char col_gray2[]       = "#444444";
